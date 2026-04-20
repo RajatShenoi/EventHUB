@@ -13,8 +13,6 @@ export default function NavBar() {
           <Link to="/">Events</Link>
           {user.role !== 'admin' && <Link to="/my-registrations">My Registrations</Link>}
           {user.role === 'admin' && <Link to="/admin/events">Manage Events</Link>}
-          {user.role === 'admin' && <Link to="/admin/checkin">Check-in Scanner</Link>}
-          {user.role === 'admin' && <Link to="/admin/role-requests">Role Requests</Link>}
           {user.role === 'admin' && <Link to="/admin/users">Users</Link>}
           <button
             className="button-secondary"

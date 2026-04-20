@@ -56,11 +56,4 @@ def me():
 @auth_bp.post("/request-admin")
 @jwt_required()
 def request_admin():
-    user_id = int(get_jwt_identity())
-    data = request.get_json() or {}
-    reason = data.get("reason", "I would like to help manage events.")
-    request_obj = AuthService.request_admin_role(user_id, reason)
-    return {
-        "success": True,
-        "data": {"id": request_obj.id, "status": request_obj.status, "reason": request_obj.reason},
-    }, 201
+    raise ApiError("Users cannot request admin role. Admins must update roles from the Users page.", 403)

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -11,23 +11,74 @@ function emptyValues(fields) {
   return result;
 }
 
+function renderDynamicField(field, value, onChange) {
+  if (field.field_type === 'textarea') {
+    return <textarea required={field.is_required} value={value} onChange={(e) => onChange(e.target.value)} />;
+  }
+
+  if (field.field_type === 'select') {
+    return (
+      <select required={field.is_required} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Select an option</option>
+        {(field.options || []).map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (field.field_type === 'radio') {
+    return (
+      <div>
+        {(field.options || []).map((option) => (
+          <label key={option} className="radio-label">
+            <input
+              type="radio"
+              name={`radio-${field.field_name}`}
+              checked={value === option}
+              onChange={() => onChange(option)}
+            />
+            {option}
+          </label>
+        ))}
+      </div>
+    );
+  }
+
+  const inputType = field.field_type === 'phone' ? 'tel' : field.field_type;
+  return <input type={inputType} required={field.is_required} value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
 export default function EventDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [eventData, setEventData] = useState(null);
   const [formValues, setFormValues] = useState({});
   const [registerRes, setRegisterRes] = useState(null);
+  const [existingRegistration, setExistingRegistration] = useState(null);
   const [results, setResults] = useState(null);
+  const [participantsData, setParticipantsData] = useState({ fields: [], participants: [] });
+  const [checkinHistory, setCheckinHistory] = useState([]);
+  const [manualToken, setManualToken] = useState('');
+  const [scanMessage, setScanMessage] = useState('');
+  const [scannerKey, setScannerKey] = useState(0);
+  const [publishNotice, setPublishNotice] = useState('');
+  const [publishing, setPublishing] = useState(false);
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const scannerId = `qr-reader-event-${id}-${scannerKey}`;
+
+  const loadEventDetails = async () => {
+    const response = await api.get(`/events/${id}`);
+    setEventData(response.data);
+    setFormValues(emptyValues(response.data.fields || []));
+  };
 
   useEffect(() => {
-    api
-      .get(`/events/${id}`)
-      .then((res) => {
-        setEventData(res.data);
-        setFormValues(emptyValues(res.data.fields || []));
-      })
-      .catch((err) => setError(err.message));
+    loadEventDetails().catch((err) => setError(err.message));
   }, [id]);
 
   useEffect(() => {
@@ -41,10 +92,100 @@ export default function EventDetailPage() {
       .catch(() => {});
   }, [id, eventData]);
 
+  useEffect(() => {
+    if (user?.role !== 'admin') {
+      return;
+    }
+
+    api
+      .get(`/results/event/${id}/participants`)
+      .then((res) => setParticipantsData(res.data))
+      .catch((err) => setError(err.message));
+  }, [id, user]);
+
+  const refreshCheckinHistory = async () => {
+    const response = await api.get(`/checkin/history?event_id=${id}`);
+    setCheckinHistory(response.data);
+  };
+
+  const submitScan = async (qrToken) => {
+    if (!qrToken) {
+      return;
+    }
+
+    try {
+      const response = await api.post('/checkin/scan', {
+        qr_token: qrToken,
+        event_id: Number(id),
+      });
+      setScanMessage(`Scan result: ${response.data.result}`);
+      await refreshCheckinHistory();
+    } catch (err) {
+      setScanMessage(err.message);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role !== 'admin') {
+      return undefined;
+    }
+
+    refreshCheckinHistory().catch((err) => setScanMessage(err.message));
+
+    let scanner = null;
+    let cancelled = false;
+
+    import('html5-qrcode')
+      .then(({ Html5QrcodeScanner }) => {
+        if (cancelled) {
+          return;
+        }
+
+        const scannerElement = document.getElementById(scannerId);
+        if (!scannerElement) {
+          return;
+        }
+
+        scanner = new Html5QrcodeScanner(scannerId, { fps: 10, qrbox: 220 }, false);
+        scanner.render(
+          (decodedText) => {
+            submitScan(decodedText);
+          },
+          () => {}
+        );
+      })
+      .catch((err) => {
+        setScanMessage(`Scanner failed to initialize: ${err.message}`);
+      });
+
+    return () => {
+      cancelled = true;
+      if (scanner) {
+        scanner.clear().catch(() => {});
+      }
+    };
+  }, [id, user, scannerId]);
+
+  useEffect(() => {
+    if (user?.role !== 'user') {
+      setExistingRegistration(null);
+      return;
+    }
+
+    api
+      .get('/registrations')
+      .then((res) => {
+        const match = (res.data || []).find((item) => Number(item.event_id) === Number(id));
+        setExistingRegistration(match || null);
+      })
+      .catch(() => {});
+  }, [id, user]);
+
   const canRegister = useMemo(() => {
     if (!eventData) return false;
+    if (existingRegistration) return false;
     return eventData.status === 'open' || eventData.status === 'ongoing';
-  }, [eventData]);
+  }, [eventData, existingRegistration]);
 
   const onRegister = async (e) => {
     e.preventDefault();
@@ -60,6 +201,67 @@ export default function EventDetailPage() {
     }
   };
 
+  const updateParticipant = (userId, key, value) => {
+    setParticipantsData((prev) => ({
+      ...prev,
+      participants: prev.participants.map((item) => (item.user_id === userId ? { ...item, [key]: value } : item)),
+    }));
+  };
+
+  const publishScores = async () => {
+    setError('');
+    setPublishNotice('');
+    setPublishing(true);
+    try {
+      const scores = participantsData.participants.map((item) => ({
+        user_id: item.user_id,
+        score: item.score,
+        remarks: item.remarks,
+      }));
+
+      await api.post(`/results/event/${id}/publish`, { scores });
+
+      const [participantsResponse, resultsResponse] = await Promise.all([
+        api.get(`/results/event/${id}/participants`),
+        api.get(`/results/event/${id}`),
+      ]);
+
+      setParticipantsData(participantsResponse.data);
+      setResults(resultsResponse.data);
+      setPublishNotice('Results published successfully. Ranks were calculated automatically.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const updateEventStatus = async (status) => {
+    setError('');
+    setNotice('');
+    try {
+      await api.put(`/events/${id}`, { status });
+      await loadEventDetails();
+      setNotice(`Event status updated to ${status}.`);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const deleteEvent = async () => {
+    if (!window.confirm('Delete this event?')) {
+      return;
+    }
+    setError('');
+    setNotice('');
+    try {
+      await api.del(`/events/${id}`);
+      navigate('/admin/events');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   if (!eventData) {
     return <div className="container">Loading event details...</div>;
   }
@@ -67,6 +269,8 @@ export default function EventDetailPage() {
   return (
     <div className="container">
       <h1>{eventData.title}</h1>
+      {notice && <p className="notice">{notice}</p>}
+      {error && <p className="error">{error}</p>}
       <p>{eventData.description}</p>
       <p>
         <strong>Location:</strong> {eventData.location}
@@ -79,6 +283,20 @@ export default function EventDetailPage() {
         <section className="card">
           <h2>Management Mode</h2>
           <p>Admins manage events and check-ins, but cannot register for events.</p>
+          <div className="stack-horizontal">
+            <button className="button-secondary" onClick={() => updateEventStatus('open')}>
+              Open
+            </button>
+            <button className="button-secondary" onClick={() => updateEventStatus('ongoing')}>
+              Ongoing
+            </button>
+            <button className="button-secondary" onClick={() => updateEventStatus('completed')}>
+              Completed
+            </button>
+            <button className="button-danger" onClick={deleteEvent}>
+              Delete
+            </button>
+          </div>
         </section>
       ) : canRegister && (
         <form className="card" onSubmit={onRegister}>
@@ -86,21 +304,135 @@ export default function EventDetailPage() {
           {eventData.fields?.map((field) => (
             <label key={field.id}>
               {field.label}
-              <input
-                required={field.is_required}
-                value={formValues[field.field_name] || ''}
-                onChange={(e) => setFormValues({ ...formValues, [field.field_name]: e.target.value })}
-              />
+              {renderDynamicField(field, formValues[field.field_name] || '', (nextValue) =>
+                setFormValues({ ...formValues, [field.field_name]: nextValue })
+              )}
             </label>
           ))}
-          {error && <p className="error">{error}</p>}
           <button className="button-primary" type="submit">
             Register
           </button>
         </form>
       )}
 
-      {registerRes && (
+      {user?.role === 'admin' && (
+        <section className="card">
+          <h2>Event Check-in Scanner</h2>
+          <p>Only QR codes belonging to this event will be accepted.</p>
+          <div id={scannerId} className="card" />
+          <div className="stack-horizontal">
+            <button className="button-secondary" onClick={() => setScannerKey((prev) => prev + 1)}>
+              Restart Scanner
+            </button>
+          </div>
+
+          <h3>Manual Check-in</h3>
+          <textarea
+            rows="4"
+            placeholder="Paste QR token"
+            value={manualToken}
+            onChange={(e) => setManualToken(e.target.value)}
+          />
+          <button className="button-primary" onClick={() => submitScan(manualToken)}>
+            Submit Token
+          </button>
+
+          {scanMessage && <p className="notice">{scanMessage}</p>}
+
+          <h3>Event Scan History</h3>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Registration</th>
+                  <th>Result</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {checkinHistory.map((item) => (
+                  <tr key={item.id}>
+                    <td>{new Date(item.scanned_at).toLocaleString()}</td>
+                    <td>{item.registration_id ?? '-'}</td>
+                    <td>{item.result}</td>
+                    <td>{item.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {user?.role === 'user' && existingRegistration && eventData.status !== 'completed' && (
+        <section className="card">
+          <h2>Already Registered</h2>
+          <p>You are already registered for this event. Use this QR for check-in.</p>
+          {existingRegistration.qr_image && <img src={existingRegistration.qr_image} alt="Check-in QR" className="qr" />}
+          <details>
+            <summary>Show QR token</summary>
+            <code className="code">{existingRegistration.qr_token}</code>
+          </details>
+        </section>
+      )}
+
+      {user?.role === 'admin' && (
+        <section className="card">
+          <h2>Publish Event Results</h2>
+          <p>Enter marks for participants. Rank is computed automatically from highest score to lowest score.</p>
+          {publishNotice && <p className="notice">{publishNotice}</p>}
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>User ID</th>
+                  <th>Name</th>
+                  {participantsData.fields.map((field) => (
+                    <th key={field.field_name}>{field.label}</th>
+                  ))}
+                  <th>Marks</th>
+                  <th>Rank</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {participantsData.participants.map((item) => (
+                  <tr key={item.user_id}>
+                    <td>{item.user_id}</td>
+                    <td>{item.full_name}</td>
+                    {participantsData.fields.map((field) => (
+                      <td key={`${item.user_id}-${field.field_name}`}>{item.field_values?.[field.field_name] || '-'}</td>
+                    ))}
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={item.score ?? ''}
+                        onChange={(e) => updateParticipant(item.user_id, 'score', e.target.value)}
+                        placeholder="Marks"
+                      />
+                    </td>
+                    <td>{item.rank ?? '-'}</td>
+                    <td>
+                      <input
+                        value={item.remarks ?? ''}
+                        onChange={(e) => updateParticipant(item.user_id, 'remarks', e.target.value)}
+                        placeholder="Remarks"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <button className="button-primary" onClick={publishScores} disabled={publishing}>
+            {publishing ? 'Publishing...' : 'Publish Results'}
+          </button>
+        </section>
+      )}
+
+      {registerRes && eventData.status !== 'completed' && (
         <section className="card">
           <h2>Registration Successful</h2>
           <p>Use this QR for event check-in:</p>
@@ -115,25 +447,37 @@ export default function EventDetailPage() {
       {eventData.status === 'completed' && results && (
         <section className="card">
           <h2>Event Results</h2>
-          <p>
-            Attendance: {results.attendance.checked_in}/{results.attendance.total_registered} checked in
-          </p>
+          {user?.role === 'admin' && results.attendance && (
+            <p>
+              Attendance: {results.attendance.checked_in}/{results.attendance.total_registered} checked in
+            </p>
+          )}
+
+          {user?.role !== 'admin' && results.my_result?.remarks && (
+            <section className="subtle card">
+              <h3>Your Remark</h3>
+              <p>{results.my_result.remarks}</p>
+            </section>
+          )}
+
           <table className="table">
             <thead>
               <tr>
-                <th>User</th>
+                <th>User ID</th>
+                <th>Name</th>
                 <th>Score</th>
                 <th>Rank</th>
-                <th>Remarks</th>
+                {user?.role === 'admin' && <th>Remarks</th>}
               </tr>
             </thead>
             <tbody>
               {results.ranking.map((item) => (
                 <tr key={`${item.user_id}-${item.rank}`}>
                   <td>{item.user_id}</td>
+                  <td>{item.full_name || '-'}</td>
                   <td>{item.score}</td>
                   <td>{item.rank}</td>
-                  <td>{item.remarks || '-'}</td>
+                  {user?.role === 'admin' && <td>{item.remarks || '-'}</td>}
                 </tr>
               ))}
             </tbody>

@@ -1,9 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import NavBar from './components/NavBar';
 import ProtectedRoute from './components/ProtectedRoute';
-import AdminCheckinPage from './pages/AdminCheckinPage';
 import AdminEventsPage from './pages/AdminEventsPage';
-import AdminRoleRequestsPage from './pages/AdminRoleRequestsPage';
 import AdminUsersPage from './pages/AdminUsersPage';
 import EventDetailPage from './pages/EventDetailPage';
 import EventsPage from './pages/EventsPage';
@@ -45,22 +43,6 @@ export default function App() {
           element={
             <ProtectedRoute roles={['admin']}>
               <AdminEventsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin/checkin"
-          element={
-            <ProtectedRoute roles={['admin']}>
-              <AdminCheckinPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin/role-requests"
-          element={
-            <ProtectedRoute roles={['admin']}>
-              <AdminRoleRequestsPage />
             </ProtectedRoute>
           }
         />

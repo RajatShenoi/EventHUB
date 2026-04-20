@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 
 const INITIAL_EVENT = {
@@ -17,6 +18,7 @@ const INITIAL_FIELD = {
   field_type: 'text',
   is_required: true,
   options: [],
+  options_text: '',
   regex_pattern: '',
   max_length: '',
 };
@@ -27,7 +29,6 @@ export default function AdminEventsPage() {
   const [fields, setFields] = useState([]);
   const [fieldDraft, setFieldDraft] = useState(INITIAL_FIELD);
   const [error, setError] = useState('');
-  const [resultForm, setResultForm] = useState({ event_id: '', user_id: '', score: '', rank: '', remarks: '' });
   const [notice, setNotice] = useState('');
 
   const loadEvents = () => {
@@ -43,8 +44,37 @@ export default function AdminEventsPage() {
 
   const addField = () => {
     if (!fieldDraft.field_name || !fieldDraft.label) return;
-    setFields([...fields, { ...fieldDraft, max_length: fieldDraft.max_length ? Number(fieldDraft.max_length) : null }]);
+
+    const options = ['select', 'radio'].includes(fieldDraft.field_type)
+      ? fieldDraft.options_text
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : [];
+
+    if (['select', 'radio'].includes(fieldDraft.field_type) && options.length === 0) {
+      setError('Please provide at least one option for option-based question fields.');
+      return;
+    }
+
+    setFields([
+      ...fields,
+      {
+        field_name: fieldDraft.field_name,
+        label: fieldDraft.label,
+        field_type: fieldDraft.field_type,
+        is_required: fieldDraft.is_required,
+        options,
+        regex_pattern: fieldDraft.regex_pattern,
+        max_length: fieldDraft.max_length ? Number(fieldDraft.max_length) : null,
+      },
+    ]);
+    setError('');
     setFieldDraft(INITIAL_FIELD);
+  };
+
+  const removeField = (indexToRemove) => {
+    setFields((prev) => prev.filter((_, index) => index !== indexToRemove));
   };
 
   const createEvent = async (e) => {
@@ -76,22 +106,6 @@ export default function AdminEventsPage() {
     try {
       await api.del(`/events/${eventId}`);
       loadEvents();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const publishResult = async (e) => {
-    e.preventDefault();
-    try {
-      await api.post(`/results/event/${Number(resultForm.event_id)}`, {
-        user_id: Number(resultForm.user_id),
-        score: Number(resultForm.score),
-        rank: Number(resultForm.rank),
-        remarks: resultForm.remarks,
-      });
-      setResultForm({ event_id: '', user_id: '', score: '', rank: '', remarks: '' });
-      setNotice('Result published. Users can view once event is completed.');
     } catch (err) {
       setError(err.message);
     }
@@ -141,7 +155,7 @@ export default function AdminEventsPage() {
             <input value={fieldDraft.field_name} onChange={(e) => setFieldDraft({ ...fieldDraft, field_name: e.target.value })} />
           </label>
           <label>
-            Label
+            Question / Label
             <input value={fieldDraft.label} onChange={(e) => setFieldDraft({ ...fieldDraft, label: e.target.value })} />
           </label>
           <label>
@@ -151,8 +165,20 @@ export default function AdminEventsPage() {
               <option value="email">email</option>
               <option value="phone">phone</option>
               <option value="textarea">textarea</option>
+              <option value="select">select (question + options)</option>
+              <option value="radio">radio (question + options)</option>
             </select>
           </label>
+          {['select', 'radio'].includes(fieldDraft.field_type) && (
+            <label>
+              Options (comma-separated)
+              <input
+                value={fieldDraft.options_text}
+                onChange={(e) => setFieldDraft({ ...fieldDraft, options_text: e.target.value })}
+                placeholder="Option 1, Option 2, Option 3"
+              />
+            </label>
+          )}
           <label>
             Regex Pattern
             <input value={fieldDraft.regex_pattern} onChange={(e) => setFieldDraft({ ...fieldDraft, regex_pattern: e.target.value })} />
@@ -160,38 +186,43 @@ export default function AdminEventsPage() {
           <button className="button-secondary" type="button" onClick={addField}>
             Add Field
           </button>
-          <pre className="code">{JSON.stringify(fields, null, 2)}</pre>
+
+          {fields.length > 0 && (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Field Name</th>
+                    <th>Question</th>
+                    <th>Type</th>
+                    <th>Options</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fields.map((field, index) => (
+                    <tr key={`${field.field_name}-${index}`}>
+                      <td>{index + 1}</td>
+                      <td>{field.field_name}</td>
+                      <td>{field.label}</td>
+                      <td>{field.field_type}</td>
+                      <td>{field.options?.length ? field.options.join(', ') : '-'}</td>
+                      <td>
+                        <button className="button-danger" type="button" onClick={() => removeField(index)}>
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         <button className="button-primary" type="submit">
           Create Event
-        </button>
-      </form>
-
-      <form className="card" onSubmit={publishResult}>
-        <h2>Publish Event Result</h2>
-        <label>
-          Event ID
-          <input value={resultForm.event_id} onChange={(e) => setResultForm({ ...resultForm, event_id: e.target.value })} required />
-        </label>
-        <label>
-          User ID
-          <input value={resultForm.user_id} onChange={(e) => setResultForm({ ...resultForm, user_id: e.target.value })} required />
-        </label>
-        <label>
-          Score
-          <input value={resultForm.score} onChange={(e) => setResultForm({ ...resultForm, score: e.target.value })} required />
-        </label>
-        <label>
-          Rank
-          <input value={resultForm.rank} onChange={(e) => setResultForm({ ...resultForm, rank: e.target.value })} required />
-        </label>
-        <label>
-          Remarks
-          <input value={resultForm.remarks} onChange={(e) => setResultForm({ ...resultForm, remarks: e.target.value })} />
-        </label>
-        <button className="button-primary" type="submit">
-          Publish Result
         </button>
       </form>
 
@@ -202,6 +233,9 @@ export default function AdminEventsPage() {
             <p>{event.description}</p>
             <p>Status: {event.status}</p>
             <div className="stack-horizontal">
+              <Link className="button-secondary inline-block" to={`/events/${event.id}`}>
+                Open Event Page
+              </Link>
               <button className="button-secondary" onClick={() => updateStatus(event.id, 'open')}>
                 Open
               </button>

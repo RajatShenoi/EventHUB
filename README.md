@@ -48,12 +48,12 @@ Frontend runs at `http://localhost:5173`.
 
 ## Core API Endpoints
 
-- Auth: `/api/auth/register`, `/api/auth/login`, `/api/auth/me`, `/api/auth/request-admin`
+- Auth: `/api/auth/register`, `/api/auth/login`, `/api/auth/me`
 - Events: `GET/POST /api/events`, `GET/PUT/DELETE /api/events/:id`
 - Registrations: `POST/GET /api/registrations`, `PUT/DELETE /api/registrations/:id`
 - Check-in: `POST /api/checkin/scan`, `GET /api/checkin/history`
 - Results: `GET/POST /api/results/event/:event_id`
-- Admin role requests: `GET /api/admin/role-requests`, `POST /api/admin/role-requests/:id/review`
+- Admin users: `GET /api/admin/users`, `PUT /api/admin/users/:id`, `DELETE /api/admin/users/:id`
 
 ## Notes
 

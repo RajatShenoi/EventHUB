@@ -1,3 +1,4 @@
+import json
 import re
 
 from ..core.errors import ApiError
@@ -45,6 +46,10 @@ class RegistrationService:
                 raise ApiError(f"{field.label} exceeds max length", 422)
             if value and field.regex_pattern and not re.match(field.regex_pattern, str(value)):
                 raise ApiError(f"{field.label} is invalid", 422)
+            if value and field.field_type in ["select", "radio"]:
+                allowed = json.loads(field.options_json or "[]")
+                if allowed and str(value) not in allowed:
+                    raise ApiError(f"{field.label} has an invalid option", 422)
 
         registration = Registration(user_id=user_id, event_id=event_id, status="registered")
         db.session.add(registration)
@@ -113,6 +118,8 @@ class RegistrationService:
             if field:
                 field_map[field.field_name] = value.value
 
+        qr_image = qr_base64_from_token(registration.qr_token) if registration.qr_token else None
+
         return {
             "id": registration.id,
             "user_id": registration.user_id,
@@ -120,5 +127,6 @@ class RegistrationService:
             "status": registration.status,
             "checked_in_at": registration.checked_in_at.isoformat() if registration.checked_in_at else None,
             "qr_token": registration.qr_token,
+            "qr_image": qr_image,
             "field_values": field_map,
         }
