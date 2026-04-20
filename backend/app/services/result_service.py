@@ -1,6 +1,7 @@
 from ..core.errors import ApiError
 from ..extensions import db
 from ..models.models import Event, EventField, EventResult, Registration, RegistrationFieldValue, User
+import json
 
 
 class ResultService:
@@ -31,6 +32,53 @@ class ResultService:
             "total_registered": total,
             "checked_in": checked_in,
             "no_show": max(total - checked_in, 0),
+        }
+
+    @staticmethod
+    def all_event_registrations_with_fields(event_id):
+        """Get all registered users with their check-in status and submitted field values"""
+        fields = EventField.query.filter_by(event_id=event_id).order_by(EventField.display_order.asc()).all()
+        registrations = (
+            Registration.query.filter_by(event_id=event_id)
+            .order_by(Registration.created_at.asc())
+            .all()
+        )
+
+        rows = []
+        for registration in registrations:
+            user = User.query.get(registration.user_id)
+            if not user:
+                continue
+
+            values = RegistrationFieldValue.query.filter_by(registration_id=registration.id).all()
+            values_map = {}
+            for value in values:
+                field = EventField.query.get(value.event_field_id)
+                if field:
+                    values_map[field.field_name] = value.value
+
+            rows.append(
+                {
+                    "registration_id": registration.id,
+                    "user_id": user.id,
+                    "full_name": user.full_name,
+                    "check_in_status": registration.status,
+                    "field_values": values_map,
+                }
+            )
+
+        return {
+            "fields": [
+                {
+                    "field_name": field.field_name,
+                    "label": field.label,
+                    "field_type": field.field_type,
+                    "is_required": field.is_required,
+                    "options": json.loads(field.options_json or "[]") if field.field_type in ["select", "radio"] else [],
+                }
+                for field in fields
+            ],
+            "registrations": rows,
         }
 
     @staticmethod

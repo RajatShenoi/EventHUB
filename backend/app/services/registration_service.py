@@ -9,6 +9,55 @@ from ..models.models import Event, EventField, Registration, RegistrationFieldVa
 
 class RegistrationService:
     @staticmethod
+    def _validate_field_value(field, value):
+        if field.is_required and (value is None or str(value).strip() == ""):
+            raise ApiError(f"{field.label} is required", 422)
+        if value and field.max_length and len(str(value)) > field.max_length:
+            raise ApiError(f"{field.label} exceeds max length", 422)
+        if value and field.regex_pattern and not re.match(field.regex_pattern, str(value)):
+            raise ApiError(f"{field.label} is invalid", 422)
+        if value and field.field_type in ["select", "radio"]:
+            allowed = json.loads(field.options_json or "[]")
+            if allowed and str(value) not in allowed:
+                raise ApiError(f"{field.label} has an invalid option", 422)
+
+    @staticmethod
+    def _update_registration_fields(registration, field_values, allow_checked_in=False):
+        if not isinstance(field_values, dict):
+            raise ApiError("field_values must be an object", 400)
+        if registration.status == "checked_in" and not allow_checked_in:
+            raise ApiError("Cannot edit after check-in", 409)
+
+        fields = EventField.query.filter_by(event_id=registration.event_id).all()
+        fields_by_name = {item.field_name: item for item in fields}
+
+        for field_name in field_values:
+            if field_name not in fields_by_name:
+                raise ApiError(f"Unknown registration field: {field_name}", 422)
+
+        existing_values = RegistrationFieldValue.query.filter_by(registration_id=registration.id).all()
+        values_by_field_id = {item.event_field_id: item for item in existing_values}
+
+        for field_name, value in field_values.items():
+            field = fields_by_name[field_name]
+            RegistrationService._validate_field_value(field, value)
+
+            existing = values_by_field_id.get(field.id)
+            if existing:
+                existing.value = str(value)
+            else:
+                db.session.add(
+                    RegistrationFieldValue(
+                        registration_id=registration.id,
+                        event_field_id=field.id,
+                        value=str(value),
+                    )
+                )
+
+        db.session.commit()
+        return registration
+
+    @staticmethod
     def list_for_user(user_id):
         registrations = Registration.query.filter_by(user_id=user_id).all()
         return registrations
@@ -40,16 +89,7 @@ class RegistrationService:
 
         for field in fields:
             value = field_values.get(field.field_name)
-            if field.is_required and (value is None or str(value).strip() == ""):
-                raise ApiError(f"{field.label} is required", 422)
-            if value and field.max_length and len(str(value)) > field.max_length:
-                raise ApiError(f"{field.label} exceeds max length", 422)
-            if value and field.regex_pattern and not re.match(field.regex_pattern, str(value)):
-                raise ApiError(f"{field.label} is invalid", 422)
-            if value and field.field_type in ["select", "radio"]:
-                allowed = json.loads(field.options_json or "[]")
-                if allowed and str(value) not in allowed:
-                    raise ApiError(f"{field.label} has an invalid option", 422)
+            RegistrationService._validate_field_value(field, value)
 
         registration = Registration(user_id=user_id, event_id=event_id, status="registered")
         db.session.add(registration)
@@ -95,19 +135,15 @@ class RegistrationService:
             raise ApiError("Registration not found", 404)
         if registration.user_id != user_id:
             raise ApiError("Forbidden", 403)
-        if registration.status == "checked_in":
-            raise ApiError("Cannot edit after check-in", 409)
+        return RegistrationService._update_registration_fields(registration, field_values, allow_checked_in=False)
 
-        values = RegistrationFieldValue.query.filter_by(registration_id=registration.id).all()
-        fields = {item.event_field_id: EventField.query.get(item.event_field_id) for item in values}
+    @staticmethod
+    def admin_update_registration(registration_id, field_values):
+        registration = Registration.query.get(registration_id)
+        if not registration:
+            raise ApiError("Registration not found", 404)
 
-        for item in values:
-            field = fields.get(item.event_field_id)
-            if field and field.field_name in field_values:
-                item.value = str(field_values[field.field_name])
-
-        db.session.commit()
-        return registration
+        return RegistrationService._update_registration_fields(registration, field_values, allow_checked_in=True)
 
     @staticmethod
     def serialize_registration(registration):

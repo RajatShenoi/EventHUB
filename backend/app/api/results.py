@@ -62,6 +62,17 @@ def get_event_results(event_id):
     }
 
 
+@results_bp.get("/event/<int:event_id>/registrations")
+@role_required("admin")
+def get_event_registrations(event_id):
+    event = Event.query.get(event_id)
+    if not event:
+        raise ApiError("Event not found", 404)
+
+    payload = ResultService.all_event_registrations_with_fields(event_id)
+    return {"success": True, "data": payload}
+
+
 @results_bp.get("/event/<int:event_id>/participants")
 @role_required("admin")
 def get_event_participants(event_id):

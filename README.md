@@ -90,7 +90,7 @@ Frontend runs at `http://localhost:5173`.
 ### Check-in (admin)
 - `POST /api/checkin/scan` (supports `event_id` for event-scoped validation)
 - `GET /api/checkin/history`
-- `GET /api/checkin/history?event_id=<id>`
+- `GET /api/checkin/history?event_id={event_id}`
 
 ### Results
 - `GET /api/results/event/:event_id` (user/admin, role-filtered output)

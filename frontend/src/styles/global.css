@@ -192,3 +192,22 @@ button {
     align-items: flex-start;
   }
 }
+
+.status-checked-in {
+  background: #d4edda;
+  color: #155724;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.status-registered {
+  background: #cfe2ff;
+  color: #084298;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+

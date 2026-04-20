@@ -49,6 +49,14 @@ def update_registration(registration_id):
     return {"success": True, "data": RegistrationService.serialize_registration(registration)}
 
 
+@registrations_bp.put("/admin/<int:registration_id>")
+@role_required("admin")
+def admin_update_registration(registration_id):
+    payload = request.get_json() or {}
+    registration = RegistrationService.admin_update_registration(registration_id, payload.get("field_values", {}))
+    return {"success": True, "data": RegistrationService.serialize_registration(registration)}
+
+
 @registrations_bp.delete("/<int:registration_id>")
 @role_required("user")
 def cancel_registration(registration_id):

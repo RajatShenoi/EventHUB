@@ -51,6 +51,41 @@ function renderDynamicField(field, value, onChange) {
   return <input type={inputType} required={field.is_required} value={value} onChange={(e) => onChange(e.target.value)} />;
 }
 
+function renderRegistrationEditField(field, value, onChange, inputName) {
+  if (field.field_type === 'textarea') {
+    return <textarea required={field.is_required} value={value} onChange={(e) => onChange(e.target.value)} />;
+  }
+
+  if (field.field_type === 'select') {
+    return (
+      <select required={field.is_required} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Select an option</option>
+        {(field.options || []).map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (field.field_type === 'radio') {
+    return (
+      <div>
+        {(field.options || []).map((option) => (
+          <label key={option} className="radio-label">
+            <input type="radio" name={inputName} checked={value === option} onChange={() => onChange(option)} />
+            {option}
+          </label>
+        ))}
+      </div>
+    );
+  }
+
+  const inputType = field.field_type === 'phone' ? 'tel' : field.field_type;
+  return <input type={inputType} required={field.is_required} value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
 export default function EventDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -60,6 +95,7 @@ export default function EventDetailPage() {
   const [registerRes, setRegisterRes] = useState(null);
   const [existingRegistration, setExistingRegistration] = useState(null);
   const [results, setResults] = useState(null);
+  const [registrationsData, setRegistrationsData] = useState({ fields: [], registrations: [] });
   const [participantsData, setParticipantsData] = useState({ fields: [], participants: [] });
   const [checkinHistory, setCheckinHistory] = useState([]);
   const [manualToken, setManualToken] = useState('');
@@ -67,9 +103,13 @@ export default function EventDetailPage() {
   const [scannerKey, setScannerKey] = useState(0);
   const [publishNotice, setPublishNotice] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [savingRegistrationId, setSavingRegistrationId] = useState(null);
+  const [editingRegistrationId, setEditingRegistrationId] = useState(null);
+  const [registrationDrafts, setRegistrationDrafts] = useState({});
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const scannerId = `qr-reader-event-${id}-${scannerKey}`;
+
 
   const loadEventDetails = async () => {
     const response = await api.get(`/events/${id}`);
@@ -91,6 +131,17 @@ export default function EventDetailPage() {
       .then((res) => setResults(res.data))
       .catch(() => {});
   }, [id, eventData]);
+
+  useEffect(() => {
+    if (user?.role !== 'admin') {
+      return;
+    }
+
+    api
+      .get(`/results/event/${id}/registrations`)
+      .then((res) => setRegistrationsData(res.data))
+      .catch((err) => setError(err.message));
+  }, [id, user]);
 
   useEffect(() => {
     if (user?.role !== 'admin') {
@@ -206,6 +257,66 @@ export default function EventDetailPage() {
       ...prev,
       participants: prev.participants.map((item) => (item.user_id === userId ? { ...item, [key]: value } : item)),
     }));
+  };
+
+  const updateRegistrationField = (registrationId, fieldName, value) => {
+    setRegistrationDrafts((prev) => ({
+      ...prev,
+      [registrationId]: {
+        ...(prev[registrationId] || {}),
+        [fieldName]: value,
+      },
+    }));
+  };
+
+  const startEditingRegistration = (registrationId) => {
+    const row = registrationsData.registrations.find((item) => item.registration_id === registrationId);
+    setEditingRegistrationId(registrationId);
+    setRegistrationDrafts((prev) => ({
+      ...prev,
+      [registrationId]: { ...(row?.field_values || {}) },
+    }));
+  };
+
+  const cancelEditingRegistration = (registrationId) => {
+    setEditingRegistrationId(null);
+    setRegistrationDrafts((prev) => {
+      const next = { ...prev };
+      delete next[registrationId];
+      return next;
+    });
+  };
+
+  const saveRegistrationDetails = async (registrationId) => {
+    setError('');
+    setNotice('');
+    setSavingRegistrationId(registrationId);
+
+    try {
+      const fieldValues = registrationDrafts[registrationId] || {};
+      await api.put(`/registrations/admin/${registrationId}`, {
+        field_values: fieldValues,
+      });
+
+      const [registrationsResponse, participantsResponse] = await Promise.all([
+        api.get(`/results/event/${id}/registrations`),
+        api.get(`/results/event/${id}/participants`),
+      ]);
+
+      setRegistrationsData(registrationsResponse.data);
+      setParticipantsData(participantsResponse.data);
+      setEditingRegistrationId(null);
+      setRegistrationDrafts((prev) => {
+        const next = { ...prev };
+        delete next[registrationId];
+        return next;
+      });
+      setNotice('Registration details updated successfully.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingRegistrationId(null);
+    }
   };
 
   const publishScores = async () => {
@@ -374,6 +485,81 @@ export default function EventDetailPage() {
             <summary>Show QR token</summary>
             <code className="code">{existingRegistration.qr_token}</code>
           </details>
+        </section>
+      )}
+
+      {user?.role === 'admin' && (
+        <section className="card">
+          <h2>All Registrations</h2>
+          <p>View all registered users, their check-in status, and submitted event details.</p>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>User ID</th>
+                  <th>Name</th>
+                  <th>Check-in Status</th>
+                  {registrationsData.fields.map((field) => (
+                    <th key={field.field_name}>{field.label}</th>
+                  ))}
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {registrationsData.registrations.map((item) => (
+                  <tr key={item.registration_id}>
+                    <td>{item.user_id}</td>
+                    <td>{item.full_name}</td>
+                    <td>
+                      <span className={item.check_in_status === 'checked_in' ? 'status-checked-in' : 'status-registered'}>
+                        {item.check_in_status}
+                      </span>
+                    </td>
+                    {registrationsData.fields.map((field) => (
+                      <td key={`${item.user_id}-${field.field_name}`}>
+                        {editingRegistrationId === item.registration_id
+                          ? renderRegistrationEditField(
+                              field,
+                              registrationDrafts[item.registration_id]?.[field.field_name] || '',
+                              (nextValue) => updateRegistrationField(item.registration_id, field.field_name, nextValue),
+                              `registration-${item.registration_id}-${field.field_name}`
+                            )
+                          : item.field_values?.[field.field_name] || '-'}
+                      </td>
+                    ))}
+                    <td>
+                      {editingRegistrationId === item.registration_id ? (
+                        <div className="stack-horizontal">
+                          <button
+                            className="button-primary"
+                            onClick={() => saveRegistrationDetails(item.registration_id)}
+                            disabled={savingRegistrationId === item.registration_id}
+                          >
+                            {savingRegistrationId === item.registration_id ? 'Saving...' : 'Save'}
+                          </button>
+                          <button
+                            className="button-secondary"
+                            onClick={() => cancelEditingRegistration(item.registration_id)}
+                            disabled={savingRegistrationId === item.registration_id}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          className="button-secondary"
+                          onClick={() => startEditingRegistration(item.registration_id)}
+                          disabled={savingRegistrationId !== null}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
