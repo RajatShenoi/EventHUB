@@ -211,6 +211,65 @@ button:active {
   border-radius: 8px;
 }
 
+.registration-details {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.registration-detail {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #faf6ee;
+}
+
+.registration-detail-label {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.registration-detail-value {
+  font-weight: 700;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(29, 26, 23, 0.55);
+  backdrop-filter: blur(3px);
+  z-index: 50;
+}
+
+.modal-card {
+  width: min(92vw, 520px);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.25rem;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+}
+
+.modal-success {
+  border-left: 6px solid var(--brand);
+}
+
+.modal-warning {
+  border-left: 6px solid var(--accent);
+}
+
+.modal-error {
+  border-left: 6px solid var(--danger);
+}
+
 @media (max-width: 768px) {
   .nav {
     flex-direction: column;

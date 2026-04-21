@@ -175,6 +175,7 @@ class RegistrationService:
     @staticmethod
     def serialize_registration(registration):
         db = get_db()
+        event = db.events.find_one({"id": registration["event_id"]})
         values = list(db.registration_field_values.find({"registration_id": registration["id"]}))
         field_ids = [item["event_field_id"] for item in values]
         field_docs = list(db.event_fields.find({"id": {"$in": field_ids}})) if field_ids else []
@@ -186,15 +187,30 @@ class RegistrationService:
             if field:
                 field_map[field["field_name"]] = value.get("value")
 
+        submitted_fields = []
+        for value in values:
+            field = field_map_by_id.get(value["event_field_id"])
+            if field:
+                submitted_fields.append(
+                    {
+                        "field_name": field["field_name"],
+                        "label": field["label"],
+                        "field_type": field["field_type"],
+                        "value": value.get("value"),
+                    }
+                )
+
         qr_image = qr_base64_from_token(registration["qr_token"]) if registration.get("qr_token") else None
 
         return {
             "id": registration["id"],
             "user_id": registration["user_id"],
             "event_id": registration["event_id"],
+            "event_title": event["title"] if event else f"Event #{registration['event_id']}",
             "status": registration.get("status"),
             "checked_in_at": registration["checked_in_at"].isoformat() if registration.get("checked_in_at") else None,
             "qr_token": registration.get("qr_token"),
             "qr_image": qr_image,
             "field_values": field_map,
+            "submitted_fields": submitted_fields,
         }

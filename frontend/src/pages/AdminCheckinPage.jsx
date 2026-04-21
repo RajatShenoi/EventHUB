@@ -5,9 +5,56 @@ import { api } from '../api/client';
 export default function AdminCheckinPage() {
   const scannerRef = useRef(null);
   const scannerContainerRef = useRef(null);
+  const scanLockRef = useRef(false);
   const [manualToken, setManualToken] = useState('');
   const [scanMessage, setScanMessage] = useState('');
+  const [scanPopup, setScanPopup] = useState(null);
   const [history, setHistory] = useState([]);
+
+  const stopScanner = async () => {
+    const scanner = scannerRef.current;
+    scannerRef.current = null;
+
+    if (scanner) {
+      try {
+        await scanner.clear();
+      } catch {
+        if (scannerContainerRef.current) {
+          scannerContainerRef.current.innerHTML = '';
+        }
+      }
+    }
+
+    if (scannerContainerRef.current) {
+      scannerContainerRef.current.innerHTML = '';
+    }
+  };
+
+  const startScanner = () => {
+    if (scannerRef.current || !scannerContainerRef.current) {
+      return;
+    }
+
+    scanLockRef.current = false;
+    scannerContainerRef.current.innerHTML = '';
+
+    const scanner = new Html5QrcodeScanner('qr-reader', { fps: 10, qrbox: 220 }, false);
+
+    scanner.render(
+      async (decodedText) => {
+        if (scanLockRef.current) {
+          return;
+        }
+
+        scanLockRef.current = true;
+        await stopScanner();
+        await submitScan(decodedText, true);
+      },
+      () => {}
+    );
+
+    scannerRef.current = scanner;
+  };
 
   const refreshHistory = () => {
     api
@@ -22,49 +69,37 @@ export default function AdminCheckinPage() {
     }
     try {
       const res = await api.post('/checkin/scan', { qr_token });
-      setScanMessage(`Scan result: ${res.data.result}`);
+      const result = res.data.result;
+      const registration = res.data.registration;
+      const message =
+        result === 'success'
+          ? `${registration?.event_title || 'Registration'} checked in successfully.`
+          : 'This user is already checked in.';
+
+      setScanMessage(message);
+      setScanPopup({
+        title: result === 'success' ? 'Check-in successful' : 'Check-in already recorded',
+        message,
+        kind: result === 'success' ? 'success' : 'warning',
+      });
       refreshHistory();
     } catch (err) {
       setScanMessage(err.message);
+      setScanPopup({
+        title: 'Check-in failed',
+        message: err.message,
+        kind: 'error',
+      });
     }
   };
 
   useEffect(() => {
     refreshHistory();
 
-    if (scannerRef.current) {
-      return undefined;
-    }
-
-    if (!scannerContainerRef.current) {
-      return undefined;
-    }
-
-    scannerContainerRef.current.innerHTML = '';
-
-    const scanner = new Html5QrcodeScanner('qr-reader', { fps: 10, qrbox: 220 }, false);
-
-    scanner.render(
-      (decodedText) => {
-        submitScan(decodedText);
-      },
-      () => {}
-    );
-
-    scannerRef.current = scanner;
+    startScanner();
 
     return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(() => {
-          if (scannerContainerRef.current) {
-            scannerContainerRef.current.innerHTML = '';
-          }
-        });
-        scannerRef.current = null;
-      }
-      if (scannerContainerRef.current) {
-        scannerContainerRef.current.innerHTML = '';
-      }
+      stopScanner();
     };
   }, []);
 
@@ -88,6 +123,36 @@ export default function AdminCheckinPage() {
       </section>
 
       {scanMessage && <p className="notice">{scanMessage}</p>}
+
+      {scanPopup && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setScanPopup(null)}>
+          <div className={`modal-card modal-${scanPopup.kind}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <h2>{scanPopup.title}</h2>
+            <p>{scanPopup.message}</p>
+            <div className="stack-horizontal">
+              <button
+                className="button-primary"
+                onClick={async () => {
+                  setScanPopup(null);
+                  await stopScanner();
+                  startScanner();
+                }}
+              >
+                Scan Next QR
+              </button>
+              <button
+                className="button-secondary"
+                onClick={async () => {
+                  setScanPopup(null);
+                  await stopScanner();
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="card">
         <h2>Recent Scan History</h2>
