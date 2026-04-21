@@ -1,6 +1,5 @@
 import os
 from flask import Flask
-from sqlalchemy import event
 
 from .api.admin import admin_bp
 from .api.auth import auth_bp
@@ -10,7 +9,8 @@ from .api.registrations import registrations_bp
 from .api.results import results_bp
 from .config import Config
 from .core.errors import register_error_handlers
-from .extensions import cors, db, jwt
+from .db.mongo import init_mongo
+from .extensions import cors, jwt
 
 
 def create_app(config_class=Config):
@@ -18,7 +18,7 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
     os.makedirs(app.instance_path, exist_ok=True)
 
-    db.init_app(app)
+    init_mongo(app)
     jwt.init_app(app)
     cors.init_app(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"].split(",")}})
 
@@ -30,17 +30,6 @@ def create_app(config_class=Config):
     app.register_blueprint(checkin_bp, url_prefix="/api/checkin")
     app.register_blueprint(results_bp, url_prefix="/api/results")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
-
-    with app.app_context():
-        @event.listens_for(db.engine, "connect")
-        def enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-        from . import models  # noqa: F401
-
-        db.create_all()
 
     @app.get("/api/health")
     def health():

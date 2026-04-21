@@ -3,7 +3,6 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from ..core.decorators import role_required
 from ..core.errors import ApiError
-from ..models.models import Registration
 from ..services.registration_service import RegistrationService
 
 registrations_bp = Blueprint("registrations", __name__)

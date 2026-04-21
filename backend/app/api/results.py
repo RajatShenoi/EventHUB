@@ -3,7 +3,8 @@ from flask_jwt_extended import get_jwt, get_jwt_identity
 
 from ..core.decorators import role_required
 from ..core.errors import ApiError
-from ..models.models import Event, User
+from ..db.mongo import get_db
+from ..services.event_service import EventService
 from ..services.result_service import ResultService
 
 results_bp = Blueprint("results", __name__)
@@ -15,37 +16,37 @@ def get_event_results(event_id):
     role = get_jwt().get("role")
     current_user_id = int(get_jwt_identity())
 
-    event = Event.query.get(event_id)
-    if not event:
-        raise ApiError("Event not found", 404)
-    if event.status != "completed" and role != "admin":
+    event = EventService.get_event(event_id)
+    if event["status"] != "completed" and role != "admin":
         raise ApiError("Results are available after event completion", 403)
 
     rows, _ = ResultService.event_results(event_id)
     summary = ResultService.attendance_summary(event_id)
-    user_ids = [item.user_id for item in rows]
-    user_map = {user.id: user.full_name for user in User.query.filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    user_ids = [item["user_id"] for item in rows]
+    db = get_db()
+    users = list(db.users.find({"id": {"$in": user_ids}})) if user_ids else []
+    user_map = {user["id"]: user["full_name"] for user in users}
 
     ranking = []
     my_result = None
     for item in rows:
         row = {
-            "user_id": item.user_id,
-            "full_name": user_map.get(item.user_id),
-            "score": item.score,
-            "rank": item.rank,
+            "user_id": item["user_id"],
+            "full_name": user_map.get(item["user_id"]),
+            "score": item["score"],
+            "rank": item["rank"],
         }
         if role == "admin":
-            row["remarks"] = item.remarks
+            row["remarks"] = item.get("remarks")
         ranking.append(row)
 
-        if item.user_id == current_user_id:
+        if item["user_id"] == current_user_id:
             my_result = {
-                "user_id": item.user_id,
-                "full_name": user_map.get(item.user_id),
-                "score": item.score,
-                "rank": item.rank,
-                "remarks": item.remarks,
+                "user_id": item["user_id"],
+                "full_name": user_map.get(item["user_id"]),
+                "score": item["score"],
+                "rank": item["rank"],
+                "remarks": item.get("remarks"),
             }
 
     response_data = {
@@ -65,9 +66,7 @@ def get_event_results(event_id):
 @results_bp.get("/event/<int:event_id>/registrations")
 @role_required("admin")
 def get_event_registrations(event_id):
-    event = Event.query.get(event_id)
-    if not event:
-        raise ApiError("Event not found", 404)
+    EventService.get_event(event_id)
 
     payload = ResultService.all_event_registrations_with_fields(event_id)
     return {"success": True, "data": payload}
@@ -76,9 +75,7 @@ def get_event_registrations(event_id):
 @results_bp.get("/event/<int:event_id>/participants")
 @role_required("admin")
 def get_event_participants(event_id):
-    event = Event.query.get(event_id)
-    if not event:
-        raise ApiError("Event not found", 404)
+    EventService.get_event(event_id)
 
     payload = ResultService.event_participants_with_fields(event_id)
     return {"success": True, "data": payload}
@@ -87,9 +84,7 @@ def get_event_participants(event_id):
 @results_bp.post("/event/<int:event_id>/publish")
 @role_required("admin")
 def publish_event_results(event_id):
-    event = Event.query.get(event_id)
-    if not event:
-        raise ApiError("Event not found", 404)
+    EventService.get_event(event_id)
 
     payload = request.get_json() or {}
     entries = payload.get("scores", [])

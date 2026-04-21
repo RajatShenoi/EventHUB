@@ -2,7 +2,6 @@ from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from ..core.errors import ApiError
-from ..models.models import User
 from ..services.auth_service import AuthService
 
 auth_bp = Blueprint("auth", __name__)
@@ -18,7 +17,7 @@ def register():
     user = AuthService.register_user(data["email"].lower(), data["full_name"], data["password"])
     return {
         "success": True,
-        "data": {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role},
+        "data": {"id": user["id"], "email": user["email"], "full_name": user["full_name"], "role": user["role"]},
     }, 201
 
 
@@ -34,7 +33,7 @@ def login():
         "success": True,
         "data": {
             "token": token,
-            "user": {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role},
+            "user": {"id": user["id"], "email": user["email"], "full_name": user["full_name"], "role": user["role"]},
         },
     }
 
@@ -43,13 +42,11 @@ def login():
 @jwt_required()
 def me():
     user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-    if not user:
-        raise ApiError("User not found", 404)
+    user = AuthService.get_user(user_id)
 
     return {
         "success": True,
-        "data": {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role},
+        "data": {"id": user["id"], "email": user["email"], "full_name": user["full_name"], "role": user["role"]},
     }
 
 
