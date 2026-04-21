@@ -1,4 +1,3 @@
-import os
 from flask import Flask
 
 from .api.admin import admin_bp
@@ -14,9 +13,8 @@ from .extensions import cors, jwt
 
 
 def create_app(config_class=Config):
-    app = Flask(__name__, instance_relative_config=True)
+    app = Flask(__name__)
     app.config.from_object(config_class)
-    os.makedirs(app.instance_path, exist_ok=True)
 
     init_mongo(app)
     jwt.init_app(app)
