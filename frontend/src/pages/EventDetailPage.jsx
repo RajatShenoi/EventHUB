@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -90,6 +90,8 @@ export default function EventDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const scannerRef = useRef(null);
+  const scanLockRef = useRef(false);
   const [eventData, setEventData] = useState(null);
   const [formValues, setFormValues] = useState({});
   const [registerRes, setRegisterRes] = useState(null);
@@ -100,6 +102,7 @@ export default function EventDetailPage() {
   const [checkinHistory, setCheckinHistory] = useState([]);
   const [manualToken, setManualToken] = useState('');
   const [scanMessage, setScanMessage] = useState('');
+  const [scanPopup, setScanPopup] = useState(null);
   const [scannerKey, setScannerKey] = useState(0);
   const [publishNotice, setPublishNotice] = useState('');
   const [publishing, setPublishing] = useState(false);
@@ -109,6 +112,64 @@ export default function EventDetailPage() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const scannerId = `qr-reader-event-${id}-${scannerKey}`;
+
+  const stopScanner = async () => {
+    const scanner = scannerRef.current;
+    scannerRef.current = null;
+
+    if (scanner) {
+      try {
+        await scanner.clear();
+      } catch {
+        const scannerElement = document.getElementById(scannerId);
+        if (scannerElement) {
+          scannerElement.innerHTML = '';
+        }
+      }
+    }
+
+    const scannerElement = document.getElementById(scannerId);
+    if (scannerElement) {
+      scannerElement.innerHTML = '';
+    }
+  };
+
+  const startScanner = async () => {
+    if (scannerRef.current) {
+      return;
+    }
+
+    scanLockRef.current = false;
+
+    const scannerElement = document.getElementById(scannerId);
+    if (!scannerElement) {
+      return;
+    }
+
+    scannerElement.innerHTML = '';
+
+    const { Html5QrcodeScanner } = await import('html5-qrcode');
+    if (!document.getElementById(scannerId)) {
+      return;
+    }
+
+    const scanner = new Html5QrcodeScanner(scannerId, { fps: 10, qrbox: 220 }, false);
+
+    scanner.render(
+      async (decodedText) => {
+        if (scanLockRef.current) {
+          return;
+        }
+
+        scanLockRef.current = true;
+        await stopScanner();
+        await submitScan(decodedText);
+      },
+      () => {}
+    );
+
+    scannerRef.current = scanner;
+  };
 
 
   const loadEventDetails = async () => {
@@ -169,10 +230,26 @@ export default function EventDetailPage() {
         qr_token: qrToken,
         event_id: Number(id),
       });
-      setScanMessage(`Scan result: ${response.data.result}`);
+      const result = response.data.result;
+      const message =
+        result === 'success'
+          ? 'Check-in successful.'
+          : 'This attendee is already checked in.';
+
+      setScanMessage(message);
+      setScanPopup({
+        title: result === 'success' ? 'Check-in successful' : 'Already checked in',
+        message,
+        kind: result === 'success' ? 'success' : 'warning',
+      });
       await refreshCheckinHistory();
     } catch (err) {
       setScanMessage(err.message);
+      setScanPopup({
+        title: 'Check-in failed',
+        message: err.message,
+        kind: 'error',
+      });
     }
   };
 
@@ -183,37 +260,17 @@ export default function EventDetailPage() {
 
     refreshCheckinHistory().catch((err) => setScanMessage(err.message));
 
-    let scanner = null;
     let cancelled = false;
 
-    import('html5-qrcode')
-      .then(({ Html5QrcodeScanner }) => {
-        if (cancelled) {
-          return;
-        }
-
-        const scannerElement = document.getElementById(scannerId);
-        if (!scannerElement) {
-          return;
-        }
-
-        scanner = new Html5QrcodeScanner(scannerId, { fps: 10, qrbox: 220 }, false);
-        scanner.render(
-          (decodedText) => {
-            submitScan(decodedText);
-          },
-          () => {}
-        );
-      })
-      .catch((err) => {
+    startScanner().catch((err) => {
+      if (!cancelled) {
         setScanMessage(`Scanner failed to initialize: ${err.message}`);
-      });
+      }
+    });
 
     return () => {
       cancelled = true;
-      if (scanner) {
-        scanner.clear().catch(() => {});
-      }
+      stopScanner().catch(() => {});
     };
   }, [id, user, scannerId]);
 
@@ -449,6 +506,36 @@ export default function EventDetailPage() {
           </button>
 
           {scanMessage && <p className="notice">{scanMessage}</p>}
+
+          {scanPopup && (
+            <div className="modal-backdrop" role="presentation" onClick={() => setScanPopup(null)}>
+              <div className={`modal-card modal-${scanPopup.kind}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+                <h2>{scanPopup.title}</h2>
+                <p>{scanPopup.message}</p>
+                <div className="stack-horizontal">
+                  <button
+                    className="button-primary"
+                    onClick={async () => {
+                      setScanPopup(null);
+                      await stopScanner();
+                      startScanner().catch((err) => setScanMessage(`Scanner failed to restart: ${err.message}`));
+                    }}
+                  >
+                    Scan Next QR
+                  </button>
+                  <button
+                    className="button-secondary"
+                    onClick={async () => {
+                      setScanPopup(null);
+                      await stopScanner();
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <h3>Event Scan History</h3>
           <div className="table-wrap">
