@@ -236,3 +236,40 @@ button:active {
   font-weight: 600;
 }
 
+.status-checked_in {
+  background: #d4edda;
+  color: #155724;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.field-list {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+  background: #fbf7f0;
+  padding: 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.field-item {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 2fr;
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.field-item dt {
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.field-item dd {
+  margin: 0;
+  color: var(--ink);
+  word-break: break-word;
+}
+
